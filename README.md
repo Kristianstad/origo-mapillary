@@ -6,6 +6,10 @@ I nuvarande version exponeras clientToken.
 **<ins>Det rekommenderas att inte använda denna plugin på externa kartor</ins>**.  
 För att använda denna plugin på externa kartor bör OAuth 2.0 Authorization Code Flow implementeras.  (https://www.mapillary.com/developer/api-documentation#authentication)
 
+## Ladda ner byggd plugin
+
+[Ladda ner senaste byggda versionen](https://nightly.link/Kristianstad/origo-mapillary/workflows/build/main/origomapillary-built-assets.zip). Zip-filen innehåller `origomapillary.min.js`.
+
 MapillaryJS CSS måste inkluderas.
 ```HTML
 <link href="https://unpkg.com/mapillary-js@4.0.0/dist/mapillary.css" rel="stylesheet" >

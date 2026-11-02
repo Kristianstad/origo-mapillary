@@ -1,0 +1,36 @@
+name: Build and package the Mapillary plugin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-package-lock --no-audit --no-fund
+
+      - name: Build plugin
+        run: npm run build -- --output-path ./build
+
+      - name: Upload built plugin
+        uses: actions/upload-artifact@v6
+        with:
+          name: origomapillary-built-assets
+          path: build/origomapillary.min.js
+          if-no-files-found: error
