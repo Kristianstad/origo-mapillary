@@ -1,16 +1,17 @@
 import Origo from 'Origo';
-import MVT from 'ol/format/MVT';
-import VectorLayer from 'ol/layer/Vector';
-import VectorSource from 'ol/source/Vector';
-import VectorTileLayer from 'ol/layer/VectorTile';
-import VectorTileSource from 'ol/source/VectorTile';
-import Point from 'ol/geom/Point';
-import { fromLonLat } from 'ol/proj';
-import { Feature } from 'ol';
 import { Viewer } from 'mapillary-js';
-import { Circle, Fill, Stroke, Style, Icon } from 'ol/style';
-import CircleStyle from 'ol/style/Circle';
 import dragElement from './utils/dragElement';
+
+const {
+  Feature,
+  format: { MVT },
+  geom: { Point },
+  layer: { Vector: VectorLayer, VectorTile: VectorTileLayer },
+  proj: { fromLonLat },
+  source: { Vector: VectorSource, VectorTile: VectorTileSource },
+  style: { Circle, Fill, Icon, Stroke, Style }
+} = Origo.ol;
+const CircleStyle = Circle;
 
 const origomapillary = function origomapillary(options = {}) {
   let viewer;
