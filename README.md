@@ -2,6 +2,7 @@
 
 Mapillary + MapillaryJS som plugin för Origo.  
 Pluginet använder OpenLayers-klasserna som Origo exponerar via `Origo.ol`, så kartan och pluginet använder samma OpenLayers-version.
+Bildpositioner transformeras från EPSG:4326 till kartans aktuella projektion med Origos `getMapUtils().transformCoordinate`. Pluginet kräver inte `Origo.ol.proj`.
 I nuvarande version exponeras clientToken.  
 **<ins>Det rekommenderas att inte använda denna plugin på externa kartor</ins>**.  
 För att använda denna plugin på externa kartor bör OAuth 2.0 Authorization Code Flow implementeras.  (https://www.mapillary.com/developer/api-documentation#authentication)

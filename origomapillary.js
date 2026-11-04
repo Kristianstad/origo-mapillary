@@ -7,7 +7,6 @@ const {
   format: { MVT },
   geom: { Point },
   layer: { Vector: VectorLayer, VectorTile: VectorTileLayer },
-  proj: { fromLonLat },
   source: { Vector: VectorSource, VectorTile: VectorTileSource },
   style: { Circle, Fill, Icon, Stroke, Style }
 } = Origo.ol;
@@ -131,7 +130,11 @@ const origomapillary = function origomapillary(options = {}) {
   async function setMarker() {
     const position = await mapillaryViewer.getPosition();
     const bearing = await mapillaryViewer.getBearing();
-    const pos = fromLonLat([position.lng, position.lat]);
+    const pos = viewer.getMapUtils().transformCoordinate(
+      [position.lng, position.lat],
+      'EPSG:4326',
+      map.getView().getProjection()
+    );
 
     const pointFeature = new Feature({
       geometry: new Point(pos)
