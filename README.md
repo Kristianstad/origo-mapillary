@@ -21,6 +21,7 @@ MapillaryJS CSS måste inkluderas.
 - `mapillaryUrl` : `string` URL till Mapillarys VectorTile. **Valfri**.
 - `organizationId` : `integer` Filtering på organisations-ID. Om inget anges visas allt. **Valfri**.
 - `declutter` : `boolean` Om declutter ska användas på Mapillary-lagret. **Valfri**.
+- `startActive` : `boolean` Öppnar pluginet automatiskt efter rendering när värdet är `true`. Standard är `false`. Ingen bild väljs automatiskt. **Valfri**.
 - `mapillaryLayerName` : `string` Namn på Mapillary-lagret. **Valfri**.
 - `normalLegendLabel` : `string` Teckenförklaringens text för icke-360-bilder . **Valfri**.
 - `panoLegendLabel` : `string` Teckensförklaringens text för 360-bilder. **Valfri**.
@@ -48,6 +49,15 @@ normalViewerHeight: '20rem'
 normalViewerWidth: '25rem'
 largeViewerHeight: '40rem'
 largeViewerWidth: '50rem'
+```
+
+För att öppna pluginet när kartan laddas:
+```JS
+const mapillary = new origomapillary({
+	clientToken: 'DIN_TOKEN',
+	startActive: true
+});
+viewer.addComponent(mapillary);
 ```
 
 ### Demo

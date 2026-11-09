@@ -360,6 +360,12 @@ const origomapillary = function origomapillary(options = {}) {
         document.getElementById(sizeButton.getId()).addEventListener('click', toggleSize);
         handleInteraction();
       }
+      if (options.startActive === true) {
+        await enableInteraction();
+        if (mapillaryViewer) {
+          mapillaryViewer.resize();
+        }
+      }
       this.dispatch('render');
     }
   });
