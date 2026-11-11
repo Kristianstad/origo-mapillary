@@ -3,6 +3,7 @@
 Mapillary + MapillaryJS som plugin för Origo.  
 Pluginet använder OpenLayers-klasserna som Origo exponerar via `Origo.ol`, så kartan och pluginet använder samma OpenLayers-version.
 Bildpositioner transformeras från EPSG:4326 till kartans aktuella projektion med Origos `getMapUtils().transformCoordinate`. Pluginet kräver inte `Origo.ol.proj`.
+Kartor i EPSG:3857 använder vektorplattor direkt. I andra registrerade projektioner läses Mapillarys plattor i EPSG:3857 och geometrierna transformeras till kartans koordinatsystem innan de visas.
 I nuvarande version exponeras clientToken.  
 **<ins>Det rekommenderas att inte använda denna plugin på externa kartor</ins>**.  
 För att använda denna plugin på externa kartor bör OAuth 2.0 Authorization Code Flow implementeras.  (https://www.mapillary.com/developer/api-documentation#authentication)
@@ -59,6 +60,53 @@ const mapillary = new origomapillary({
 });
 viewer.addComponent(mapillary);
 ```
+
+## Projektioner
+
+Pluginet väljer automatiskt visningssätt från kartans projektion. Ingen särskild pluginparameter behövs för exempelvis EPSG:3008, EPSG:3006 eller EPSG:4326. Mapillarys plattkälla behåller alltid EPSG:3857 och högsta tile-zoom 14; kartan kan zoomas närmare utan att punkterna försvinner.
+
+Koordinatsystem utöver Origos inbyggda behöver registreras i kartkonfigurationens `proj4Defs`. Kartans `center`, `extent` och `projectionExtent` måste anges i kartans eget koordinatsystem. Exempel för EPSG:3008:
+
+```json
+{
+	"projectionCode": "EPSG:3008",
+	"center": [191147, 6212100],
+	"extent": [100000, 6100000, 250000, 6350000],
+	"projectionExtent": [100000, 6100000, 250000, 6350000],
+	"proj4Defs": [
+		{
+			"code": "EPSG:3008",
+			"projection": "+proj=tmerc +lat_0=0 +lon_0=13.5 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+		}
+	]
+}
+```
+
+Stödet är generiskt för registrerade 2D-koordinatsystem med giltig transformation till och från EPSG:3857 över kartutsnittet. Projektionsdefinitioner, eventuella datumgridfiler och deras noggrannhet är kartans ansvar. Om transformationen saknas, utsnittet korsar en olöst projektionsgräns eller ligger utanför Mapillarys Mercator-täckning kan inga plattor visas; fel rapporteras utan att token skrivs ut.
+
+Visning och klick är oförändrade: sekvenslinjer visas på mellanzoom och bildpunkter närmare. Endast bildpunkter öppnar bilder. Markören placeras och orienteras i kartans projektion.
+Markören använder bildens ursprungliga GPS-position för `mly1_public`, eller bildens beräknade position för `mly1_computed_public`, inte visarens rörliga kameraposition. Efter ett kartklick förankras markören i bildpunktens exakta plattkoordinat tills en annan bild visas; pilspetsen förankras i samma punkt.
+
+Omprojekterad visning använder högst 6 samtidiga anrop och 128 plattor per utsnitt. Vid större plattbehov väljs en grövre tile-nivå, vilket kan senarelägga bildpunkter på extrema utsnitt. Råplattornas cache begränsas till 128 plattor och 16 MiB. Ett utsnitt får innehålla högst 16 MiB plattdata och 100 000 renderade objekt; överskridanden rapporteras i stället för att visa ett ofullständigt resultat. Avstängning avbryter pågående laddning, och komponentens `clear` frigör lyssnare och cache.
+
+## Tester
+
+Med Node.js 22 eller senare:
+
+```sh
+npm install
+npm test
+```
+
+Testerna använder OpenLayers och proj4 som utvecklingsberoenden; dessa följer inte med som separata runtimebibliotek i pluginbygget. De kontrollerar MVT-avkodning, fem projektioner, datumgräns, resursgränser, felhantering och pluginets punktklick/livscykel utan externa API-anrop.
+
+För browserkontroll mot ett lokalt Origo-bygge, använd en HTML-export där Origo-biblioteket är inbäddat i ett eget skript:
+
+```sh
+npm run test:host -- --html /path/to/origo-export.html
+```
+
+Testservern binds till localhost och återanvänder endast det isolerade Origo-biblioteket och CSS. Den ursprungliga kartkonfigurationen används inte. Testplattorna är syntetiska och kräver ingen Mapillary-token. Öppna den utskrivna URL:en med `?crs=EPSG:3008`, `?crs=EPSG:3857` eller `?crs=EPSG:4326`; testresultatet finns i `window.hostResult`.
 
 ### Demo
 ![](demomapillary.gif)

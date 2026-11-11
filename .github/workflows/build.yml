@@ -25,6 +25,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-package-lock --no-audit --no-fund
 
+      - name: Test projection support
+        run: npm test
+
       - name: Build plugin
         run: npm run build -- --output-path ./build
 

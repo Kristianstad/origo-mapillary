@@ -1,6 +1,7 @@
 import Origo from 'Origo';
 import { Viewer } from 'mapillary-js';
 import dragElement from './utils/dragElement';
+import { createProjectedCoverage, getImageId, markerRotation, matchesOrganization, nativeProjection } from './utils/mapillaryCoverage';
 
 const {
   Feature,
@@ -8,7 +9,9 @@ const {
   geom: { Point },
   layer: { Vector: VectorLayer, VectorTile: VectorTileLayer },
   source: { Vector: VectorSource, VectorTile: VectorTileSource },
-  style: { Circle, Fill, Icon, Stroke, Style }
+  style: {
+    Circle, Fill, Icon, Stroke, Style
+  }
 } = Origo.ol;
 const CircleStyle = Circle;
 
@@ -25,7 +28,10 @@ const origomapillary = function origomapillary(options = {}) {
   let mapillaryDiv;
   let mapillaryButton;
   let sizeButton;
-  let defaultStyles;
+  let coverageController;
+  let active = false;
+  let markerGeneration = 0;
+  let selectedImageLocation;
   let toggledLarge = false;
 
   const dom = Origo.ui.dom;
@@ -91,14 +97,20 @@ const origomapillary = function origomapillary(options = {}) {
     width: 2
   });
 
-  const svg = '<svg width="48" height="48" version="1.1" xmlns="http://www.w3.org/2000/svg"><path d="M12,3C7.79,3 3.7,4.41 0.38,7C4.41,12.06 7.89,16.37 12,21.5C16.08,16.42 20.24,11.24 23.65,7C20.32,4.41 16.22,3 12,3Z" /></svg>';
+  const normalFeatureStyle = new Style({ image: normalStyle, stroke: normalStroke });
+  const panoFeatureStyle = new Style({ image: panoStyle, stroke: panoStroke });
+
+  const svg = '<svg width="24" height="24" version="1.1" xmlns="http://www.w3.org/2000/svg"><path d="M12,3C7.79,3 3.7,4.41 0.38,7C4.41,12.06 7.89,16.37 12,21.5C16.08,16.42 20.24,11.24 23.65,7C20.32,4.41 16.22,3 12,3Z" /></svg>';
 
   const angleStyle = new Style({
     image: new Icon({
       opacity: 0.5,
       src: `data:image/svg+xml;utf8,${svg}`,
       scale: 1,
-      offset: [-12, 0],
+      anchor: [12, 21.5],
+      anchorXUnits: 'pixels',
+      anchorYUnits: 'pixels',
+      rotateWithView: true,
       rotation: 0
     })
   });
@@ -129,25 +141,39 @@ const origomapillary = function origomapillary(options = {}) {
   ];
 
   async function setMarker() {
-    const position = await mapillaryViewer.getPosition();
+    if (!active || !mapillaryViewer) return;
+    markerGeneration += 1;
+    const generation = markerGeneration;
+    const image = await mapillaryViewer.getImage();
+    const position = mapillaryUrl.includes('/mly1_computed_public/')
+      ? image.lngLat : image.originalLngLat;
     const bearing = await mapillaryViewer.getBearing();
-    const pos = viewer.getMapUtils().transformCoordinate(
+    if (!active || generation !== markerGeneration) return;
+    const transform = viewer.getMapUtils().transformCoordinate;
+    const projection = map.getView().getProjection();
+    const imagePosition = viewer.getMapUtils().transformCoordinate(
       [position.lng, position.lat],
       'EPSG:4326',
-      map.getView().getProjection()
+      projection
     );
+    const pos = selectedImageLocation
+      && selectedImageLocation.id === String(image.id)
+      && selectedImageLocation.projection === projection.getCode()
+      ? selectedImageLocation.coordinates : imagePosition;
 
     const pointFeature = new Feature({
       geometry: new Point(pos)
     });
 
-    angleStyle.getImage().setRotation(bearing * (Math.PI / 180));
+    angleStyle.getImage().setRotation(markerRotation(position, bearing, projection, transform));
     pointFeature.setStyle([angleStyle, selectionStyle]);
     selectionLayer.getSource().clear();
     selectionLayer.getSource().addFeature(pointFeature);
   }
 
   async function enableInteraction() {
+    if (active) return;
+    active = true;
     document.getElementById(mapillaryButton.getId()).classList.add('active');
     document.getElementById(mapillaryButton.getId()).classList.remove('tooltip');
     document.getElementById(filterBox.getId()).classList.remove('o-hidden');
@@ -157,14 +183,19 @@ const origomapillary = function origomapillary(options = {}) {
 
       viewer.addStyle('mapillary-legend', legendStyle);
       coverageLayer.set('styleName', 'mapillary-legend');
+      if (coverageController) coverageController.start();
     }
   }
 
   function disableInteraction() {
+    if (!active) return;
+    active = false;
+    markerGeneration += 1;
     document.getElementById(mapillaryButton.getId()).classList.remove('active');
     document.getElementById(mapillaryButton.getId()).classList.add('tooltip');
     document.getElementById(filterBox.getId()).classList.add('o-hidden');
     if (clientToken) {
+      if (coverageController) coverageController.stop();
       map.removeLayer(selectionLayer);
       map.removeLayer(coverageLayer);
     }
@@ -194,58 +225,104 @@ const origomapillary = function origomapillary(options = {}) {
   }
 
   const styleFunction = function styleFunction(feature) {
-    const newStyle = defaultStyles[0];
-    if (feature.get('organization_id') === organizationId) {
-      if (feature.get('is_pano')) {
-        newStyle.setImage(panoStyle);
-        newStyle.setStroke(panoStroke);
-        return newStyle;
+    if (!matchesOrganization(feature, organizationId)) return undefined;
+    return feature.get('is_pano') ? panoFeatureStyle : normalFeatureStyle;
+  };
+
+  function updateMarker() {
+    setMarker().catch(() => console.warn('Mapillary: the image marker could not be updated.'));
+  }
+
+  function handleMapClick(event) {
+    if (!active || !mapillaryViewer.isNavigable) return;
+    map.forEachFeatureAtPixel(
+      event.pixel,
+      (feature, layer) => {
+        if (layer !== coverageLayer) return undefined;
+        const imageId = getImageId(feature, organizationId);
+        if (imageId === undefined || imageId === null) return undefined;
+        const geometry = feature.getGeometry ? feature.getGeometry() : feature;
+        const coordinates = geometry.getCoordinates ? geometry.getCoordinates() : geometry.getFlatCoordinates();
+        const location = {
+          id: String(imageId),
+          coordinates: coordinates.slice(0, 2),
+          projection: map.getView().getProjection().getCode()
+        };
+        selectedImageLocation = location;
+        mapillaryViewer.moveTo(String(imageId)).catch(() => {
+          if (selectedImageLocation === location) selectedImageLocation = undefined;
+          console.warn('Mapillary: the selected image could not be opened.');
+        });
+        mapillaryViewer.resize();
+        return true;
+      },
+      {
+        layerFilter: layer => layer === coverageLayer,
+        hitTolerance: 1
       }
-      newStyle.setImage(normalStyle);
-      newStyle.setStroke(normalStroke);
-      return newStyle;
+    );
+  }
+
+  function createCoverageLayer() {
+    const nativeSource = new VectorTileSource({
+      url: `${mapillaryUrl}?access_token=${clientToken}`,
+      projection: nativeProjection,
+      maxZoom: mapillaryMaxZoom,
+      format: new MVT()
+    });
+    const settings = { declutter, title: mapillaryLayerName, style: styleFunction };
+    coverageController = undefined;
+    if (map.getView().getProjection().getCode() === nativeProjection) {
+      coverageLayer = new VectorTileLayer(Object.assign({}, settings, { source: nativeSource }));
+    } else {
+      const source = new VectorSource({ wrapX: false });
+      coverageLayer = new VectorLayer(Object.assign({}, settings, { source }));
+      coverageController = createProjectedCoverage({
+        map,
+        source,
+        nativeSource,
+        format: new MVT({ featureClass: Feature }),
+        transform: viewer.getMapUtils().transformCoordinate,
+        reportError: message => console.warn(message)
+      });
     }
+  }
 
-    return new Style();
-  };
-
-  const handleInteraction = function handleInteraction() {
-    mapillaryViewer.on('position', () => {
-      setMarker();
-    });
-
-    mapillaryViewer.on('bearing', () => {
-      setMarker();
-    });
-
-    map.on('click', (event) => {
-      map.forEachFeatureAtPixel(
-        event.pixel,
-        (feature) => {
-          if (!(feature instanceof Feature)) {
-            try {
-              const type = feature.getType();
-              if (type === 'Point') {
-                const imageId = feature.getProperties().id;
-                if (imageId && mapillaryViewer.isNavigable) {
-                  mapillaryViewer.moveTo(`${imageId}`).catch(error => error); // TODO: Get better error handling
-                  mapillaryViewer.resize();
-                }
-              }
-              // eslint-disable-next-line no-empty
-            } catch (ex) { }
-          }
-        },
-        {
-          hitTolerance: 1
-        }
-      );
-    });
-  };
+  function changeView() {
+    if (active) map.removeLayer(coverageLayer);
+    if (coverageController) coverageController.dispose();
+    markerGeneration += 1;
+    selectedImageLocation = undefined;
+    selectionLayer.getSource().clear();
+    createCoverageLayer();
+    if (active) {
+      coverageLayer.set('styleName', 'mapillary-legend');
+      map.addLayer(coverageLayer);
+      if (coverageController) coverageController.start();
+    }
+  }
 
   return Origo.ui.Component({
     name: 'origomapillary',
     onInit() {
+      this.on('clear', () => {
+        disableInteraction();
+        if (coverageController) coverageController.dispose();
+        if (map) {
+          map.un('click', handleMapClick);
+          map.un('change:view', changeView);
+        }
+        if (mapillaryViewer) {
+          mapillaryViewer.off('position', updateMarker);
+          mapillaryViewer.off('bearing', updateMarker);
+          mapillaryViewer.off('image', updateMarker);
+          mapillaryViewer.remove();
+        }
+        [mapillaryDiv, filterBox].forEach((component) => {
+          const element = document.getElementById(component.getId());
+          if (element) element.remove();
+        });
+      });
       mapillaryDiv = Origo.ui.Element({
         tagName: 'div',
         cls: 'flex column',
@@ -319,18 +396,7 @@ const origomapillary = function origomapillary(options = {}) {
       map = viewer.getMap();
 
       if (clientToken) {
-        const source = new VectorTileSource({
-          url: `${mapillaryUrl}?access_token=${clientToken}`,
-          format: new MVT()
-        });
-        const tileGrid = source.getTileGridForProjection(map.getView().getProjection());
-        source.tileGrid = viewer.getMapUtils().tileGrid({
-          extent: tileGrid.getExtent(),
-          origin: tileGrid.getOrigin(0),
-          resolutions: tileGrid.getResolutions().slice(0, mapillaryMaxZoom + 1),
-          tileSize: tileGrid.getTileSize(0)
-        });
-
+        createCoverageLayer();
         selectionLayer = new VectorLayer({
           title: 'Mapillary - Selection',
           source: new VectorSource(),
@@ -338,15 +404,11 @@ const origomapillary = function origomapillary(options = {}) {
           group: 'none'
         });
 
-        coverageLayer = new VectorTileLayer({
-          declutter,
-          title: mapillaryLayerName,
-          source
-        });
+        map.on('change:view', changeView);
       }
 
       this.addComponents([mapillaryButton]);
-      this.render();
+      await this.render();
     },
     async render() {
       document.getElementById(target).appendChild(dom.html(mapillaryDiv.render()));
@@ -364,11 +426,11 @@ const origomapillary = function origomapillary(options = {}) {
           container: document.getElementById(filterBoxContent.getId())
         });
 
-        defaultStyles = coverageLayer.getStyleFunction()();
-        coverageLayer.setStyle(styleFunction);
-
         document.getElementById(sizeButton.getId()).addEventListener('click', toggleSize);
-        handleInteraction();
+        mapillaryViewer.on('position', updateMarker);
+        mapillaryViewer.on('bearing', updateMarker);
+        mapillaryViewer.on('image', updateMarker);
+        map.on('click', handleMapClick);
       }
       if (options.startActive === true) {
         await enableInteraction();

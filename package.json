@@ -4,6 +4,8 @@
   "description": "",
   "main": "./origomapillary.js",
   "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:host": "node test/host-server.mjs",
     "start": "npm run watch-js",
     "watch-js": "webpack-dev-server --config ./tasks/webpack.dev.js --mode development",
     "build": "webpack --config ./tasks/webpack.prod.js"
@@ -30,6 +32,9 @@
     "eslint-plugin-import": "^2.22.0",
     "exports-loader": "^0.7.0",
     "imports-loader": "^0.8.0",
+    "ol": "10.6.0",
+    "pbf": "3.2.1",
+    "proj4": "2.15.0",
     "serialize-javascript": ">=3.1.0",
     "uglify-js": "3.2.0",
     "uglifyjs-webpack-plugin": "^2.1.2",

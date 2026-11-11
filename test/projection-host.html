@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Origo Projection Integration Test</title>
+  <link rel="stylesheet" href="/host-style.css">
+  <style>html, body, #app-wrapper { margin: 0; width: 100%; height: 100%; } body { background: #e7ece9; }</style>
+</head>
+<body>
+  <div id="app-wrapper"></div>
+  <script>window.hostResult = { status: 'loading' }; window.addEventListener('error', event => { window.hostResult = { status: 'error', message: event.message }; });</script>
+  <script src="/host-origo.js"></script>
+  <script type="module">
+    import { createProjectedCoverage } from '/utils/mapillaryCoverage.js';
+    const crs = new URLSearchParams(location.search).get('crs') || 'EPSG:3008';
+    const origo = Origo(`/host-config.json?crs=${encodeURIComponent(crs)}`, { svgSprites: [], defaultControls: [] });
+    origo.on('load', async () => {
+      try {
+        const viewer = origo.api();
+        const map = viewer.getMap();
+        const nativeSource = new Origo.ol.source.VectorTile({ projection: 'EPSG:3857', maxZoom: 14, url: '/fixture-tile/{z}/{x}/{y}' });
+        const source = new Origo.ol.source.Vector({ wrapX: false });
+        const layer = new Origo.ol.layer.Vector({ source, style: new Origo.ol.style.Style({
+          image: new Origo.ol.style.Circle({ radius: 8, fill: new Origo.ol.style.Fill({ color: '#cf2929' }) })
+        }) });
+        map.addLayer(layer);
+        map.renderSync();
+        const errors = [];
+        const controller = createProjectedCoverage({ map, source, nativeSource,
+          format: new Origo.ol.format.MVT({ featureClass: Origo.ol.Feature }),
+          transform: viewer.getMapUtils().transformCoordinate,
+          reportError: message => errors.push(message)
+        });
+        await controller.start();
+        map.renderSync();
+        const feature = source.getFeatures()[0];
+        if (errors.length || !feature) throw new Error(errors[0] || 'Expected a reprojected fixture point.');
+        const expected = viewer.getMapUtils().transformCoordinate([14.16, 56.03], 'EPSG:4326', map.getView().getProjection());
+        const actual = feature.getGeometry().getCoordinates();
+        const pixel = map.getPixelFromCoordinate(actual);
+        const hit = map.forEachFeatureAtPixel(pixel, candidate => candidate === feature, { layerFilter: candidate => candidate === layer });
+        window.hostResult = { status: 'passed', crs, count: source.getFeatures().length, expected, actual, pixel, hit: !!hit };
+        window.hostFixture = { map, layer, source, controller };
+      } catch (error) { window.hostResult = { status: 'error', message: error.message }; }
+    });
+  </script>
+</body>
+</html>
