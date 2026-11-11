@@ -31,6 +31,7 @@ const origomapillary = function origomapillary(options = {}) {
   const dom = Origo.ui.dom;
   const clientToken = Object.prototype.hasOwnProperty.call(options, 'clientToken') ? options.clientToken : undefined;
   const mapillaryUrl = Object.prototype.hasOwnProperty.call(options, 'mapillaryUrl') ? options.mapillaryUrl : 'https://tiles.mapillary.com/maps/vtp/mly1_public/2/{z}/{x}/{y}';
+  const mapillaryMaxZoom = 14;
   const organizationId = Object.prototype.hasOwnProperty.call(options, 'organizationId') ? options.organizationId : undefined;
   const declutter = Object.prototype.hasOwnProperty.call(options, 'declutter') ? options.declutter : true;
   const mapillaryLayerName = Object.prototype.hasOwnProperty.call(options, 'mapillaryLayerName') ? options.mapillaryLayerName : 'Mapillary';
@@ -221,7 +222,7 @@ const origomapillary = function origomapillary(options = {}) {
       map.forEachFeatureAtPixel(
         event.pixel,
         (feature) => {
-          if (map.getView().getZoom() > 14 && !(feature instanceof Feature)) {
+          if (!(feature instanceof Feature)) {
             try {
               const type = feature.getType();
               if (type === 'Point') {
@@ -318,6 +319,18 @@ const origomapillary = function origomapillary(options = {}) {
       map = viewer.getMap();
 
       if (clientToken) {
+        const source = new VectorTileSource({
+          url: `${mapillaryUrl}?access_token=${clientToken}`,
+          format: new MVT()
+        });
+        const tileGrid = source.getTileGridForProjection(map.getView().getProjection());
+        source.tileGrid = viewer.getMapUtils().tileGrid({
+          extent: tileGrid.getExtent(),
+          origin: tileGrid.getOrigin(0),
+          resolutions: tileGrid.getResolutions().slice(0, mapillaryMaxZoom + 1),
+          tileSize: tileGrid.getTileSize(0)
+        });
+
         selectionLayer = new VectorLayer({
           title: 'Mapillary - Selection',
           source: new VectorSource(),
@@ -328,10 +341,7 @@ const origomapillary = function origomapillary(options = {}) {
         coverageLayer = new VectorTileLayer({
           declutter,
           title: mapillaryLayerName,
-          source: new VectorTileSource({
-            url: `${mapillaryUrl}?access_token=${clientToken}`,
-            format: new MVT()
-          })
+          source
         });
       }
 
