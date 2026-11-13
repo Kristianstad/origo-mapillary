@@ -23,6 +23,7 @@ MapillaryJS CSS måste inkluderas.
 - `organizationId` : `integer` Filtering på organisations-ID. Om inget anges visas allt. **Valfri**.
 - `declutter` : `boolean` Om declutter ska användas på Mapillary-lagret. **Valfri**.
 - `startActive` : `boolean` Öppnar pluginet automatiskt efter rendering när värdet är `true`. Standard är `false`. Ingen bild väljs automatiskt. **Valfri**.
+- `prefetch` : `boolean` Hämtar i förväg den data som behövs för navigeringspilarna, dels för bildpunkterna i kartvyn när man är inzoomad, dels för den bildpunkt som muspekaren är över. Standard är `true`. **Valfri**.
 - `mapillaryLayerName` : `string` Namn på Mapillary-lagret. **Valfri**.
 - `normalLegendLabel` : `string` Teckenförklaringens text för icke-360-bilder . **Valfri**.
 - `panoLegendLabel` : `string` Teckensförklaringens text för 360-bilder. **Valfri**.

@@ -1,7 +1,8 @@
 import Origo from 'Origo';
-import { Viewer } from 'mapillary-js';
+import { GraphDataProvider, Viewer } from 'mapillary-js';
 import dragElement from './utils/dragElement';
 import { createProjectedCoverage, getImageId, markerRotation, matchesOrganization, nativeProjection } from './utils/mapillaryCoverage';
+import withPrefetch from './utils/mapillaryPrefetch';
 
 const {
   Feature,
@@ -29,6 +30,8 @@ const origomapillary = function origomapillary(options = {}) {
   let mapillaryButton;
   let sizeButton;
   let coverageController;
+  let dataProvider;
+  let hoveredImageId;
   let active = false;
   let markerGeneration = 0;
   let selectedImageLocation;
@@ -40,6 +43,7 @@ const origomapillary = function origomapillary(options = {}) {
   const mapillaryMaxZoom = 14;
   const organizationId = Object.prototype.hasOwnProperty.call(options, 'organizationId') ? options.organizationId : undefined;
   const declutter = Object.prototype.hasOwnProperty.call(options, 'declutter') ? options.declutter : true;
+  const prefetch = Object.prototype.hasOwnProperty.call(options, 'prefetch') ? options.prefetch : true;
   const mapillaryLayerName = Object.prototype.hasOwnProperty.call(options, 'mapillaryLayerName') ? options.mapillaryLayerName : 'Mapillary';
   const normalLegendLabel = Object.prototype.hasOwnProperty.call(options, 'normalLegendLabel') ? options.normalLegendLabel : 'Vanliga bilder';
   const panoLegendLabel = Object.prototype.hasOwnProperty.call(options, 'panoLegendLabel') ? options.panoLegendLabel : '360 bilder';
@@ -171,6 +175,67 @@ const origomapillary = function origomapillary(options = {}) {
     selectionLayer.getSource().addFeature(pointFeature);
   }
 
+  function imageAtPixel(pixel) {
+    let result;
+    map.forEachFeatureAtPixel(
+      pixel,
+      (feature, layer) => {
+        if (layer !== coverageLayer) return undefined;
+        const imageId = getImageId(feature, organizationId);
+        if (imageId === undefined || imageId === null) return undefined;
+        const geometry = feature.getGeometry ? feature.getGeometry() : feature;
+        const coordinates = geometry.getCoordinates ? geometry.getCoordinates() : geometry.getFlatCoordinates();
+        result = { feature, id: String(imageId), coordinates: coordinates.slice(0, 2) };
+        return true;
+      },
+      {
+        layerFilter: layer => layer === coverageLayer,
+        hitTolerance: 1
+      }
+    );
+    return result;
+  }
+
+  function toLngLat(coordinate, projection) {
+    const [lng, lat] = viewer.getMapUtils().transformCoordinate(coordinate, projection, 'EPSG:4326');
+    return Number.isFinite(lng) && Number.isFinite(lat) ? { lng, lat } : undefined;
+  }
+
+  function prefetchView() {
+    if (!active || !dataProvider) return;
+    const size = map.getSize();
+    if (!size || !size[0] || !size[1]) return;
+    try {
+      const projection = map.getView().getProjection();
+      const corners = [[0, 0], [size[0], 0], [size[0], size[1]], [0, size[1]]]
+        .map(pixel => toLngLat(map.getCoordinateFromPixel(pixel), projection));
+      const center = toLngLat(map.getCoordinateFromPixel([size[0] / 2, size[1] / 2]), projection);
+      if (!center || corners.some(corner => !corner)) return;
+      const sw = { lng: Math.min(...corners.map(c => c.lng)), lat: Math.min(...corners.map(c => c.lat)) };
+      const ne = { lng: Math.max(...corners.map(c => c.lng)), lat: Math.max(...corners.map(c => c.lat)) };
+      dataProvider.prefetchArea({ sw, ne, center }).catch(() => undefined);
+    } catch (error) {
+      // Prefetching is best effort; the viewer loads missing data on demand.
+    }
+  }
+
+  function handlePointerMove(event) {
+    if (!active || !dataProvider || event.dragging) return;
+    const image = imageAtPixel(event.pixel);
+    if (!image || image.id === hoveredImageId) return;
+    hoveredImageId = image.id;
+    try {
+      const sequenceId = image.feature.get('sequence_id');
+      dataProvider.prefetchImage({
+        id: image.id,
+        sequenceId: sequenceId === undefined || sequenceId === null ? undefined : String(sequenceId),
+        lngLat: toLngLat(image.coordinates, map.getView().getProjection())
+      }).catch(() => undefined);
+    } catch (error) {
+      // Prefetching is best effort; the viewer loads missing data on demand.
+    }
+  }
+
   async function enableInteraction() {
     if (active) return;
     active = true;
@@ -184,6 +249,7 @@ const origomapillary = function origomapillary(options = {}) {
       viewer.addStyle('mapillary-legend', legendStyle);
       coverageLayer.set('styleName', 'mapillary-legend');
       if (coverageController) coverageController.start();
+      prefetchView();
     }
   }
 
@@ -196,6 +262,8 @@ const origomapillary = function origomapillary(options = {}) {
     document.getElementById(filterBox.getId()).classList.add('o-hidden');
     if (clientToken) {
       if (coverageController) coverageController.stop();
+      if (dataProvider) dataProvider.cancelPrefetch();
+      hoveredImageId = undefined;
       map.removeLayer(selectionLayer);
       map.removeLayer(coverageLayer);
     }
@@ -235,32 +303,19 @@ const origomapillary = function origomapillary(options = {}) {
 
   function handleMapClick(event) {
     if (!active || !mapillaryViewer.isNavigable) return;
-    map.forEachFeatureAtPixel(
-      event.pixel,
-      (feature, layer) => {
-        if (layer !== coverageLayer) return undefined;
-        const imageId = getImageId(feature, organizationId);
-        if (imageId === undefined || imageId === null) return undefined;
-        const geometry = feature.getGeometry ? feature.getGeometry() : feature;
-        const coordinates = geometry.getCoordinates ? geometry.getCoordinates() : geometry.getFlatCoordinates();
-        const location = {
-          id: String(imageId),
-          coordinates: coordinates.slice(0, 2),
-          projection: map.getView().getProjection().getCode()
-        };
-        selectedImageLocation = location;
-        mapillaryViewer.moveTo(String(imageId)).catch(() => {
-          if (selectedImageLocation === location) selectedImageLocation = undefined;
-          console.warn('Mapillary: the selected image could not be opened.');
-        });
-        mapillaryViewer.resize();
-        return true;
-      },
-      {
-        layerFilter: layer => layer === coverageLayer,
-        hitTolerance: 1
-      }
-    );
+    const image = imageAtPixel(event.pixel);
+    if (!image) return;
+    const location = {
+      id: image.id,
+      coordinates: image.coordinates,
+      projection: map.getView().getProjection().getCode()
+    };
+    selectedImageLocation = location;
+    mapillaryViewer.moveTo(image.id).catch(() => {
+      if (selectedImageLocation === location) selectedImageLocation = undefined;
+      console.warn('Mapillary: the selected image could not be opened.');
+    });
+    mapillaryViewer.resize();
   }
 
   function createCoverageLayer() {
@@ -317,6 +372,8 @@ const origomapillary = function origomapillary(options = {}) {
         if (coverageController) coverageController.dispose();
         if (map) {
           map.un('click', handleMapClick);
+          map.un('pointermove', handlePointerMove);
+          map.un('moveend', prefetchView);
           map.un('change:view', changeView);
         }
         if (mapillaryViewer) {
@@ -428,16 +485,24 @@ const origomapillary = function origomapillary(options = {}) {
 
       dragElement(document.getElementById(filterBox.getId()));
       if (clientToken) {
-        mapillaryViewer = new Viewer({
+        if (prefetch) {
+          const PrefetchingDataProvider = withPrefetch(GraphDataProvider);
+          dataProvider = new PrefetchingDataProvider({ accessToken: clientToken });
+        }
+        mapillaryViewer = new Viewer(Object.assign({
           accessToken: clientToken,
           container: document.getElementById(filterBoxContent.getId())
-        });
+        }, dataProvider ? { dataProvider } : {}));
 
         document.getElementById(sizeButton.getId()).addEventListener('click', toggleSize);
         mapillaryViewer.on('position', updateMarker);
         mapillaryViewer.on('bearing', updateMarker);
         mapillaryViewer.on('image', updateMarker);
         map.on('click', handleMapClick);
+        if (dataProvider) {
+          map.on('pointermove', handlePointerMove);
+          map.on('moveend', prefetchView);
+        }
       }
       if (options.startActive === true) {
         await enableInteraction();

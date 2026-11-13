@@ -72,8 +72,12 @@ function host(projectionCode, options = {}) {
     return component;
   }
   let imageViewer;
+  const prefetches = [];
+  class GraphDataProvider {
+    constructor(settings) { this.settings = settings; }
+  }
   class Viewer {
-    constructor() { imageViewer = this; this.events = new Map(); this.moves = []; this.isNavigable = true; }
+    constructor(settings) { imageViewer = this; this.settings = settings; this.events = new Map(); this.moves = []; this.isNavigable = true; }
     on(name, handler) { this.events.set(name, handler); }
     off(name) { this.events.delete(name); }
     getImage() {
@@ -111,8 +115,18 @@ function host(projectionCode, options = {}) {
     document: { getElementById: id => nodes.get(id) },
     require(name) {
       if (name === 'Origo') return Origo;
-      if (name === 'mapillary-js') return { Viewer };
+      if (name === 'mapillary-js') return { GraphDataProvider, Viewer };
       if (name === './utils/mapillaryCoverage') return coverage;
+      if (name === './utils/mapillaryPrefetch') {
+        return {
+          __esModule: true,
+          default: Base => class extends Base {
+            prefetchImage(value) { prefetches.push(['image', value]); return Promise.resolve(); }
+            prefetchArea(value) { prefetches.push(['area', value]); return Promise.resolve(); }
+            cancelPrefetch() { prefetches.push(['cancel']); }
+          }
+        };
+      }
       if (name === './utils/dragElement') return () => {};
       throw new Error(`Unexpected dependency ${name}`);
     }
@@ -125,7 +139,7 @@ function host(projectionCode, options = {}) {
     getMapUtils: () => ({ transformCoordinate: transform }),
     addStyle() {}
   };
-  return { plugin, map, layers, nodes, controls, listeners, warnings, viewer, get imageViewer() { return imageViewer; } };
+  return { plugin, map, layers, nodes, controls, listeners, warnings, viewer, prefetches, get imageViewer() { return imageViewer; } };
 }
 
 class EmptyXHR {
@@ -192,6 +206,40 @@ test('default activation is unchanged and changing projection rebuilds coverage'
     state.plugin.dispatch('clear');
     assert.deepEqual(state.warnings, []);
   } finally { globalThis.XMLHttpRequest = previous; }
+});
+
+test('the viewer uses a prefetching data provider fed by map moves and hovered images', async () => {
+  const state = host('EPSG:3008');
+  await state.plugin.onAdd({ target: state.viewer });
+  const provider = state.imageViewer.settings.dataProvider;
+  assert.equal(provider.settings.accessToken, 'test-token');
+  const [kind, area] = state.prefetches.at(-1);
+  assert.equal(kind, 'area');
+  assert.ok(area.sw.lng < 14.16 && area.ne.lng > 14.16 && area.sw.lat < 56.03 && area.ne.lat > 56.03);
+  state.map.fire('moveend');
+  assert.equal(state.prefetches.filter(([name]) => name === 'area').length, 2);
+
+  const coordinates = transform([14.1605, 56.0305], 'EPSG:4326', 'EPSG:3008');
+  const point = new Feature({ geometry: new Point(coordinates), id: 'image', layer: 'image', sequence_id: 'sequence' });
+  state.map.hits = [[point, state.layers[0]]];
+  state.map.fire('pointermove', { pixel: [1, 1] });
+  state.map.fire('pointermove', { pixel: [1, 2] });
+  const hovered = state.prefetches.filter(([name]) => name === 'image');
+  assert.equal(hovered.length, 1);
+  assert.equal(hovered[0][1].id, 'image');
+  assert.equal(hovered[0][1].sequenceId, 'sequence');
+  assert.ok(Math.abs(hovered[0][1].lngLat.lng - 14.1605) < 1e-9 && Math.abs(hovered[0][1].lngLat.lat - 56.0305) < 1e-9);
+
+  state.plugin.dispatch('clear');
+  assert.deepEqual(state.prefetches.at(-1), ['cancel']);
+  assert.ok([...state.listeners.values()].every(handlers => handlers.size === 0));
+
+  const disabled = host('EPSG:3857', { prefetch: false });
+  await disabled.plugin.onAdd({ target: disabled.viewer });
+  assert.equal(disabled.imageViewer.settings.dataProvider, undefined);
+  disabled.map.fire('moveend');
+  assert.deepEqual(disabled.prefetches, []);
+  disabled.plugin.dispatch('clear');
 });
 
 for (const [endpoint, expected] of [
