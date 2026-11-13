@@ -147,6 +147,9 @@ for (const code of ['EPSG:3857', 'EPSG:3008', 'EPSG:4326']) {
       const coverageLayer = state.layers[0];
       assert.equal(coverageLayer instanceof layer.VectorTile, code === 'EPSG:3857');
       if (code === 'EPSG:3857') assert.equal(coverageLayer.getSource().getTileGrid().getMaxZoom(), 14);
+      // Origo's legend removes root overlays only when group is 'root', keyed by layer name.
+      assert.equal(coverageLayer.get('group'), 'root');
+      assert.ok(coverageLayer.get('name'));
       const point = new Feature({ geometry: new Point([1, 2]), id: 'image', layer: 'image' });
       const line = new Feature({ geometry: new LineString([[1, 2], [3, 4]]), id: 'sequence', image_id: 'image' });
       state.map.hits = [[point, state.layers[1]], [line, coverageLayer], [point, coverageLayer], [point, coverageLayer]];

@@ -270,7 +270,14 @@ const origomapillary = function origomapillary(options = {}) {
       maxZoom: mapillaryMaxZoom,
       format: new MVT()
     });
-    const settings = { declutter, title: mapillaryLayerName, style: styleFunction };
+    // Origo's legend only removes overlays with an explicit group, looked up by layer name.
+    const settings = {
+      declutter,
+      name: 'origomapillary-coverage',
+      group: 'root',
+      title: mapillaryLayerName,
+      style: styleFunction
+    };
     coverageController = undefined;
     if (map.getView().getProjection().getCode() === nativeProjection) {
       coverageLayer = new VectorTileLayer(Object.assign({}, settings, { source: nativeSource }));
